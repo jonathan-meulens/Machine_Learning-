@@ -1,0 +1,201 @@
+import matplotlib.pyplot as plt
+import numpy as np
+from sklearn.model_selection import KFold
+from sklearn.linear_model import Ridge, Lasso
+
+
+#Define Parameters
+n = 100
+p = 50 # sample size and problem dimensionality  (number of genes)
+nlambdas = 25
+lambdas = 10**np.linspace(-2,4,nlambdas)
+X = np.random.rand(n,p)  #generating the expression matrix  (independent variable)
+#print(X.shape)
+B1 = np.ones(5)
+B2 = np.zeros(p-5)
+B = np.concatenate([B1, B2], axis=None)
+eMag = 1
+X_B = np.matmul(B,X.T)
+noise = np.random.rand(n,1).flatten()
+Y = X_B + eMag * noise #create Y as signal + noise
+
+#Estimate the coefficients using OLS (note the use of backslash).
+b_ols_fulldata = np.linalg.lstsq(X, Y, rcond=None)[0]
+#Index 0 gives you the beta_values after OLS
+#Index 1 gives you square residuals
+#Index 2 gives you the rank , how many linearly independent row vectors are there
+#Index 3 gives you the singular values used in residual computations
+
+
+#Define the splits externally
+folds = 5
+kf_external = KFold(n_splits=folds)
+external_splits = kf_external.split(X)
+
+#Store the best lambda value per external fold
+lenght_of_extsplits = []
+for i, (train,test) in enumerate(external_splits):
+    lenght_of_extsplits.append(i)
+
+#Save optimal lambda value for ridge (L1 regularization)
+selLAMBDAridge = np.zeros([25,1]).flatten()
+
+#Save optimal lambda value for lasso  (L2 regulirization)
+selLAMBDAlasso = np.zeros([25,1]).flatten()
+
+
+#Collect a squared residuals per lamda
+lasso_SSE = np.zeros(len(lenght_of_extsplits))
+
+#Values for plotting
+ridge_mSSE = []
+ridge_emin = []
+ridge_Eout = []
+lasso_m_lass0_SSE = []
+lasso_e_lasso_min = []
+lasso_E_out_lasso = []
+eloc_ridge = []
+e_lasso_loc = []
+ridge_BSEL = []
+lasso_BSEL = []
+
+# Cross validation and Ridge Prediction
+folds = 5
+kf_external = KFold(n_splits=folds)
+external_splits = kf_external.split(X)
+
+for s, (train, test) in enumerate(external_splits):
+    Xtr, Xte = X[train], X[test]
+    Ytr, Yte = Y[train], Y[test]
+    kf_internal = KFold(n_splits=folds)
+    ridge_SSE = np.zeros([5, nlambdas])
+    lasso_SSE = np.zeros([5, nlambdas])
+    for j, (train_id, test_id) in enumerate(kf_internal.split(Xtr)):
+
+        #Internal loop for ridge
+        for k in range(nlambdas):
+            ridge = Ridge(alpha=lambdas[k])
+            ridge.fit(Xtr[train_id], Ytr[train_id])
+            predicted_y = ridge.predict(Xtr[test_id])
+            observed_y = Ytr[test_id]
+            eRidge = observed_y - predicted_y
+            ridge_SSE[j, k] = np.mean(eRidge**2)
+            #print(f"This is the length of ridge: {len(ridge_SSE)}")
+
+            #Internal loop for LASSO
+            lasso = Lasso(alpha=lambdas[k])
+            lasso.fit(Xtr, Ytr)
+            predicted_y = lasso.predict(Xtr)
+            observed_y = Ytr
+            eLASSO = observed_y - predicted_y
+            lasso_SSE[j,k] = np.mean(eLASSO ** 2)
+
+    #Collect the mean of, the SSE every 50 lambda values for RIDGE
+    ridge_mSSE.append(np.mean(ridge_SSE))
+
+    #Minimal error of all folds for RIDGE
+    ridge_emin.append(np.min(ridge_SSE))
+
+    #This is the index of the lambda that causes the least error (SSE) for RIDGE
+    eloc_ridge.append(np.where(ridge_SSE == ridge_emin[s]))
+    print(f"eloc per iteration {eloc_ridge}")
+    # Mean error of all folds for LASSO
+    lasso_m_lass0_SSE.append(np.mean(lasso_SSE))
+
+    # Minimal error of all folds  for LASSO
+    lasso_e_lasso_min.append(np.min(lasso_SSE))
+    print(f"this is the minimal value of lasso : {lasso_e_lasso_min}")
+
+
+    # This where the minimal error is located  for LASSO
+    e_lasso_loc.append(np.where(lasso_SSE == lasso_e_lasso_min[s]))
+    print(f"this is the location minimal list location {e_lasso_loc}")
+
+    #Test the optimal lamba for RIDGE
+    selLAMBDAridge[s] = lambdas[eloc_ridge[s][1]]
+    ridge = Ridge(alpha=lambdas[eloc_ridge[s][1]])
+    ridge.fit(Xtr[test_id,], Ytr[test_id])
+    predicted_y = ridge.predict(Xtr[test_id,])
+    observed_y = Ytr[test_id]
+    E = observed_y - predicted_y
+    ridge_Eout.append(np.mean(E**2))
+
+    #Optimal coefficients for fit
+    ridge_BSEL.append(ridge.coef_)
+
+    #Test the optimal lamba for LASSO
+    selLAMBDAlasso[s] = lambdas[1]
+    lasso = Lasso(alpha=lambdas[1])
+    lasso.fit(Xte, Yte)
+    predicted_y = lasso.predict(Xte)
+    observed_y = Yte
+    E_lasso = observed_y - predicted_y
+    lasso_E_out_lasso.append(np.mean(E_lasso ** 2))
+
+    #Define optimal coefficients for lasso fit
+    lasso_BSEL.append(lasso.coef_)
+
+# # Figures with Ridge
+# # Assuming lambdas, mSSE, eloc, emin, Eout, BridgeSEL, and B are already defined
+# # Plot the cross-validation curves
+eloc_ridge_plot = []
+for i in range(len(eloc_ridge)):
+    eloc_ridge_plot.append(eloc_ridge[i][1])
+# print(f"THIS IS THE LOCATION OF THE LEAST SSE : {eloc_ridge[0]}")
+# print(f"THIS IS THE LOCATION OF THE LEAST SSE : {eloc_ridge[0][1]}")
+
+#print(f'This is the optimal value: {lambdas[0]}')
+lasso_e_lasso_min_arr = np.array(lasso_e_lasso_min)
+lasso_opt_values = np.array([0.01, 0.01, 0.01, 0.01, 0.01])
+
+#Plot for Ridge
+plt.subplot()
+for i in range(5):
+    plt.plot(np.log10(lambdas),ridge_SSE[i,:], linewidth=2, label = f"SSE after it {i}")
+plt.scatter(np.log10(lambdas)[eloc_ridge_plot], ridge_emin, c='g')
+plt.plot([np.log10(lambdas[0]), np.log10(lambdas[-1])], [ridge_Eout, ridge_Eout],'r-')  # Plot the estimated out-of-sample error for this CV partition
+plt.xlabel('$log10(\lambda)$')
+plt.ylabel('SSE')
+plt.title('Cross Validation Curves')
+plt.legend()
+plt.show()
+
+
+
+plt.subplot()
+plt.plot(ridge_BSEL,  linewidth=2)
+plt.plot(np.linspace(0,50,50), B, c="r", linewidth=1)
+plt.title('RIDGE_METHOD $\\beta$')
+plt.xlim(0, 10)
+plt.ylim(-1,2)
+plt.show()
+
+#Figures with LASSO
+# Plot the cross-validation curves
+plt.subplot()
+for i in range(5):
+    plt.plot(np.log10(lambdas), lasso_SSE[i,:], linewidth=2, label = f"SSE after it {i}")
+plt.scatter(np.log10(lasso_opt_values), lasso_e_lasso_min_arr, color = "g")
+plt.plot([np.log10(lambdas[0]), np.log10(lambdas[-1])], [lasso_E_out_lasso, lasso_E_out_lasso],'r-')
+plt.xlabel('$log10(\lambda)$')
+plt.ylabel('SSE')
+plt.title('Cross Validation Curves for RIDGE METHOD')
+plt.legend()
+plt.show()
+
+
+# Plot the true betas
+plt.subplot()
+plt.plot(lasso_BSEL, linewidth=2)
+plt.plot(B, 'r.-', linewidth=1)
+plt.title('LASSO_METHOD $\\beta$')
+plt.xlim(0, 10)
+plt.ylim(-1,2)
+plt.show()
+
+
+# Adjust the layout to ensure that the subplots do not overlap
+plt.tight_layout()
+
+#Display figure
+plt.show()
