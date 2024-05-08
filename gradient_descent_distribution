@@ -1,0 +1,51 @@
+import matplotlib.pyplot as plt
+import numpy as np
+
+#Define Parameters (For Real Data)
+e = 5
+p = 50 #sample size
+X = np.linspace(-5,5,p)
+mu = 4
+w0 = np.exp(-1*((X - mu)** 2))
+N = e*np.random.randn(p,1)
+N = N.flatten()
+
+#Change the dimensions to a 50,0
+y = X*w0+N
+#----------------------------Getting Optimal Parameters via Gradient Descent------------------------------------#
+#-------------------------------Assuming w has Guassian Distribution-------------------------------#
+
+#Gradient Descent
+random_pick = np.random.randint(p, size=(1,1))
+w = w0[random_pick]
+w = w[0,0]
+MaxIter = 1000
+dCdmu = np.zeros(MaxIter)
+w_updates = np.zeros(MaxIter)
+learning_rate = 1e-3
+delta = 0.001
+residuals = y - X*w
+
+for i in range(MaxIter):
+    residuals = y - X*w
+    additional_term = X*w*(X-mu)
+    derivative = np.dot(residuals.T, additional_term)
+    #print(derivative)
+    dCdmu[i] = -4 * derivative
+    w = w - learning_rate * dCdmu[i]
+    w_updates[i] = w
+    if np.abs(dCdmu[i]) < delta:
+        break
+
+#Use the the w from the loop to generate a fitted line
+w_grad_desc = w_updates[len(w_updates)-1]
+
+y_grad_desc = w_grad_desc*X
+fig, ax = plt.subplots()  # Create a figure containing a single axes.
+ax.scatter(X, y, label = "Real Data", color = "blue") #Real Data
+ax.scatter(X, y_grad_desc, label = "Prediction", color = "orange") #Predictions
+ax.plot(X, y_grad_desc, label = "Fitted Line", color = "red") #Fitted Line
+
+
+ax.legend()
+plt.show()
