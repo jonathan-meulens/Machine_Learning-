@@ -1,0 +1,359 @@
+import warnings
+from tabulate import tabulate
+import pandas as pd
+import numpy as np
+import os,stat
+import matplotlib.pyplot as plt
+
+#This descision_tree was made based on a proteomics dataset , with differential protein expression levels per sample.
+##Note: See the READme file for further explanation.
+class tree_classifier():
+    def __init__(self,output_filename , class_definition: list, train_frac = 0.8, test_frac = 0.2, visualize = False, save_accuracy_table = False):
+        self.train_frac = train_frac
+        self.test_frac = test_frac
+        self.class_definition = class_definition
+        self.training_set = 0
+        self.test_set = 0
+        self.test_sample = []
+        self.visualize = visualize
+        self.save_accuracy_table = save_accuracy_table
+        self.output_filename = output_filename
+
+        #Lists needed for prediction and visualization
+        self.protein_classifiers = []
+        self.match_list = []
+        self.accuracy_list = []
+        self.table_accuracies = []
+        self.cancer_observed_dict = {}
+        self.cancer_prediction_dict = {}
+        self.cancer_nms = []
+
+
+
+        #--------------------------------------Fitting The Model-------------------------------------------------------#
+    #Fitting the model, and generating optimal cutoffs
+    def fit(self, X, y):
+        #Radonmly sample a training and test set.
+        ##Note: The samples will vary everytime , this is a great way to measure the quality of your dataset
+        ##Note: If you get good results one time , and bad results in another trial , you should check your dataset
+        self.training_set  = y.sample(frac = self.train_frac)
+        self.test_set = y.sample(frac = self.test_frac)
+
+        #These are the features , proteins and their values
+        self.test_sample = X
+
+        #Iterate through all the proteins to check which protein is the best classifier for which cancer type
+        list_of_protein_cutoffs_per_cancer = []
+        for c, cancer_dict in enumerate(self.class_definition,start = 1 ):
+            #Outcome variable that the user chooses (In our case , this is the column with cancer classes)
+            outcome_var = y
+            protein_names = X.columns
+
+            #Print the current class (cancer_class)
+            print(f"Current cancer : {cancer_dict[c]}")
+
+
+            #Calculate reference class entropy
+            p_plus = np.exp(-5)
+            p_minus = np.exp(-5)
+
+            whole_class_size = len(self.training_set)
+            proteomic_file_pd = pd.Series(outcome_var)
+
+            matches = proteomic_file_pd.value_counts().get(c, 0)
+            non_matches = whole_class_size - matches
+
+            p_plus = (p_plus + matches)/whole_class_size
+            p_minus = (p_minus + non_matches)/whole_class_size
+
+            #This is the reference class entropy.
+            entropy_protein_class = -p_plus * np.log2(p_plus) - p_minus * np.log2(p_minus)
+
+            #Here we calculate the comparison(subclass) entropy
+            ##Note: This descision tree , assumes a maximum of 2 comparison(subclass) groups
+            entropy_gain_per_subclass = []
+
+            for ctf in range(2,len(self.training_set)):
+                #Variables needed for entropy/entropy-gain
+                ##Note: We don't initialize the p_variables at 0 , because we want to avoid ZeroDivision Errors
+                p_plus_rest = np.exp(-5) #Amount of matches
+                p_minus_rest = np.exp(-5) #Amount of non-matches
+
+                #Here we select a comparison group (subclass)
+                start = 0
+                comparison_group = self.training_set.iloc[start:ctf]
+                sub_class_size = len(comparison_group)
+                #We turn the values of the comparison group into pd.Series
+                ##Note: This is because , pd.Series have the property in which you get frequency counts of all classes
+                comparison_group_file_pd = pd.Series(comparison_group)
+
+                #We calculate the matches and non-matches for the comparison group with the help of frequency counts (value_counts)
+                matches_comp = comparison_group_file_pd.value_counts().get(c, 0)
+                non_matches_comp = whole_class_size - matches
+
+                #We define the matches and non-matches for the comparison group
+                p_plus_rest = (p_plus_rest + matches_comp)/sub_class_size
+                p_minus_rest = (p_minus_rest + non_matches_comp)/sub_class_size
+
+                #Calculate entropy subclass
+                entropy_protein_subclass = -p_plus_rest * np.log2(p_plus_rest) - p_minus_rest * np.log2(p_minus_rest)
+
+                #Calculating the entropy_gain against all possible subclasses.
+                ##Note: We are essentially testing difference in entropy between the reference class vs all possible subclasses
+                ##Note: Its all possible subclasses , because this is a loop , trying all possible subclasses. (maximum of 2 subclasses)
+                entropy_gain_subclass = {ctf : entropy_protein_class - (sub_class_size/whole_class_size) * entropy_protein_subclass}
+                entropy_gain_per_subclass.append(entropy_gain_subclass)
+
+            #Calculate the maximum entropy_gain in all of the combinations above.
+            list_of_entropy_gains = [list(dict.values())[0] for dict in entropy_gain_per_subclass]
+            max_ent_gain_per_cancer = max(list_of_entropy_gains)
+
+            #Collect the index of the best cutoff of all classifiers (proteins in our case) based on the maximum_entropy gain.
+            best_ctf_idx = [list(dict.keys())[0] for dict in entropy_gain_per_subclass if list(dict.values())[0] == max_ent_gain_per_cancer][0]
+
+            #Plug the index of the best cutoff in the cutoff, to collect the best cutoff values for all classifiers (proteins)
+            optimal_cutoffs_proteins = proteomic_file.iloc[best_ctf_idx,:]
+
+            #Create a dictionary with the best cutoff values for all classifiers (proteins) to be able to classify a sepcific class (cancer_class)
+            for p, protein in enumerate(protein_names):
+                protein_cutoff_dict = {c:{protein:optimal_cutoffs_proteins[p]}}
+                list_of_protein_cutoffs_per_cancer.append(protein_cutoff_dict)
+        #Return a list of all the 5 dictionaries with the optimal classifier (protein) cutoffs per class (cancer_class)
+        #Additionally , return a list of all the classifer (protein) names
+        return list_of_protein_cutoffs_per_cancer, protein_names
+
+    # ----------------------------------------PREDICTIONS-----------------------------------------------------#
+    #Here we make predictions with the optimal cutoffs that we generated
+    ##We plug in the list of optimal cutoffs , as well as the classifier (protein) names into the function
+    def predict(self, optimal_cutoffs, classifiers):
+        #Extract the {classifier:cutoff} or {protein:cutoff} section of the dictionary
+        protein_cutoff_dict_list = [list(dicts.values())[0] for dicts in optimal_cutoffs]
+
+        #Iterate over all the classifiers and their optimal cutoff alongside the test_sample to start making predictions
+        ##Note: Because the length and position of the proteins are in the same place as they would be in the test df,
+        # we can iterate simultaneously like this
+        for p, protein in enumerate(classifiers):
+            cutoff = list(protein_cutoff_dict_list[p].values())[0]
+            target_row = np.array(list(self.test_sample[protein])) #This test_sample
+
+            #Here we check if classifier can be used based on your dataset.
+            ##Note: If the values of your dataset are heavily skewed, it could be that many classifiers might no longer be suitable.
+            ##Note: If a classifier does not have both values below or above it, we will not continue with the classifier.
+            ##Note: For extra explanation , look at READme file.
+            undefined_class_count = 0
+            if sum(target_row[target_row > cutoff]) > 0 and sum(target_row[target_row < cutoff]) > 0:
+                print(f'Protein: {protein} can be used for classification')
+                self.protein_classifiers.append(protein)
+
+                #We employ a while loop ,to make sure that we pick the right cancer_class later on
+                i = 0
+                current_protein = 0
+                while current_protein != protein:
+                    current_protein = list(list(optimal_cutoffs[i].values())[0].keys())[0]
+                    if current_protein == protein:
+                        break
+                    i = i + 1
+
+                #When we get a hit in the while loop , we save the cancer_class associated with the index above
+                ##Note: These are the cancer classes that can be classified based on the quality of your dataset
+                cancer_name = list(optimal_cutoffs[i].keys())[0]
+                c_name = [list(c_class.values())[0] for c_class in self.class_definition if list(c_class.keys())[0] == cancer_name][0]
+                #Here we collect the cancer classes that can be classified
+                self.cancer_nms.append(c_name)
+
+                #Turn it the test sample into a list
+                target_row = list(target_row)
+                #It could be that the cutoff value is not physically in the test_sample but their the test_sample
+                # but the test sample is within the range to classified. In that case , we plug the cutoff in the test_sample
+                if cutoff not in target_row:
+                    target_row.append(cutoff)
+                    target_row = np.sort(target_row)
+                #After pluggin the cutoff value in the test_sample , we get its index
+                target_row = list(target_row)
+                ctf_idx = target_row.index(cutoff)
+
+                #With the index , we seperate two groups (patients, controls)
+                ##Note: We don't know which one is which yet.
+                ##Note: Entropy_gain sadly does have a directional meaning ; This means that we cant say that if a < cutoft,
+                # then a is patient group for example.
+                first = self.test_set.iloc[0:ctf_idx]
+                second = self.test_set.iloc[ctf_idx:]
+
+                #We turn these 2 groups in to pd.Series to calculate frequency counts
+                first_pd = pd.Series(first)
+                second_pd = pd.Series(second)
+
+                #Calculate matches and non-matches
+                ##Note: The reasoning behind this , is because we assume that the group with the highest matches (class matches),
+                #is the patient group.
+                first_matches = first_pd.value_counts().get(cancer_name,0)
+                second_matches = second_pd.value_counts().get(cancer_name,0)
+                self.match_list = [first_matches, second_matches]
+
+                first_size = len(first.tolist())
+                second_size = len(second.tolist())
+
+                first_set = first.tolist()
+                second_set = second.tolist()
+
+                #Calculate the accuracy of both first and second group.
+                first_accuracy = first_matches/first_size
+                second_accuracy = second_matches/second_size
+                accuracy_list = [first_accuracy, second_accuracy]
+#-----------------------------------END DEBUG---------------------------------------------------#
+                #Here we make a list of dictionaries, with both the matches and prediction_accuracies of both groups
+                set_accuracy_dict = [{first_accuracy:first_set}, {second_accuracy:second_set}]
+                #We collect the index of the  group with highest matches/accuracy for its respective class (cancer_type)
+                max_id = np.argmax(self.match_list)
+
+                #We plug in the max_id to get the set of the group we predicted to be the patient group
+                predicted_set = list(set_accuracy_dict[max_id].values())[0]
+                #This is the predicted amount of matches (patients)
+                predicted_count = len(predicted_set)
+                #This the observed (actual) amount of matches (patients)
+                observed_count = self.match_list[max_id]
+
+                #Plot data for barplot (Observed vs Predicted Amount)
+                self.cancer_observed_dict[c_name] = observed_count
+                self.cancer_prediction_dict[c_name] = predicted_count
+
+                #This the predictive accuracy of the proteins for a particular cancer_class.
+                ##Note: Remember , there is a if statement above preventing certain proteins from being classifiers
+                acc_per_protein = list(set_accuracy_dict[max_id].keys())[0]
+
+                #This accuracy data for the output table (Rows = protein, Columns = cancer classes, Values = predictive accuracy)
+                self.table_accuracies.append(acc_per_protein)
+
+
+        #Use tabulate to output a table of protein accuracies per cancer
+            else: #This else statement , follows the if statement above. If a protein cannot be used as classifier,
+                # you get the following statement
+                print(f'Protein: {protein} CANNOT be used for classification')
+                undefined_class_count = undefined_class_count + 1
+
+            #If all the proteins (classifiers) are not eligible , then you get the following statement.
+            if undefined_class_count == len(classifiers):
+                raise ValueError("Your TEST DATASET is not a good representation of your study population")
+            #Ath the end of your loop , you will get a percentage of how many of your classifier were used for classification
+            if p == len(classifiers) - 1:
+                warnings.warn(f"Only {(len(self.protein_classifiers)/len(classifiers))*100}% of your potential classifiers can be used for classification")
+                #If its 0% then you get a Runtime error, with the following statement.
+                ##Note: Because of the stocastic nature of the sampling in this program , you just may to run the program again to get some results.
+                ##Note: However, if you have to run the program to many times to get results, the DISTRIBUTION of the values within your dataset is the problem , NOT the program.
+                if (len(self.protein_classifiers)/len(classifiers))*100 == 0.0:
+                    raise RuntimeError("For this iteration, your this model cannot make any classification; RUN AGAIN!. This is NOT NORMAL, check the DISTRIBUTION/QUALITY of your dataset")
+
+
+        # Create a output dataframe with the format --> (Rows = protein, Columns = cancer classes, Values = predictive accuracy)
+        output_df = {}
+        for c_type in self.cancer_nms:
+            output_df[c_type] = pd.Series(self.table_accuracies, index = self.protein_classifiers)
+        #Output df
+        output = pd.DataFrame(output_df)
+
+        #Gives you a warning that only x-amount of classes (cancer types) were able to be classified
+        if len(self.cancer_nms) < len(cancer_classes):
+            warnings.warn(f"Due to the distribution of values within your dataset, from {len(self.class_definition)}-classes , we can only classify {len(self.cancer_nms)}-classes")
+        else:  # If not , all your classes will be classified!
+            print("Because of the high quality of your dataset , we could classify all possible classes!")
+        #You can choose to save the predictive accuracy dataframe
+        if self.save_accuracy_table:
+            output.to_excel(self.output_filename)
+
+        table_columns = list(output.columns)
+        headers = ["Name of protein", table_columns]
+        
+        #Print the table with accuracy per protein per cancer-type --> (Rows = Protein , Columns = Cancer Type)
+        print(tabulate(output, headers, tablefmt="pretty"))
+
+
+        #Data to create barplot to visualize actual vs predicted # of patients in each cancer category
+        ##Observed numbers
+        c_name_obs = tuple(self.cancer_observed_dict.keys())
+        actual_casualties = list(self.cancer_observed_dict.values())
+
+        ##Predicted numbers
+        c_name_pred = tuple(self.cancer_prediction_dict.keys())
+        predicted_casualties = list(self.cancer_prediction_dict.values())
+
+        #Define positioning of the bars
+        ##Observed
+        obs_pos = np.arange(len(c_name_obs))
+        ##Predicted
+        ##Note: Both obs_pos and pred_obs will be the same; this was done simply for clarity
+        pred_obs = np.arange(len(c_name_pred))
+
+        # Create a figure with 2 subplots
+        ##Note: Choose if you want to visualize Observed vs Predicted
+        if self.visualize:
+            # Create a figure with 2 subplots
+            fig, axs = plt.subplots(1, 2, figsize=(15, 5))
+
+            # Create the bar plot for observed amounts
+            axs[0].bar(obs_pos, actual_casualties)
+            axs[0].set_xticks(obs_pos, tuple(c_name_obs))
+            axs[0].set_xlabel("Cancer Types")
+            axs[0].set_ylabel("# of Patients")
+            axs[0].set_title("Observed Patients per Cancer Type")
+
+            # Create the bar plot for predicted amounts
+            axs[1].bar(pred_obs, predicted_casualties)
+            axs[1].set_xticks(obs_pos, tuple(c_name_pred))
+            axs[1].set_xlabel("Cancer Types")
+            axs[1].set_ylabel("# of Patients")
+            axs[1].set_title("Predicted Patients per Cancer Type")
+
+            # Display the plots
+            plt.tight_layout()
+            plt.show()
+
+
+#----------------------------------------END-----------------------------------------------------#
+
+
+
+#----------------------------------EXAMPLES---------------------------------------------------#
+main_path = "C:\\Users\\victo\\Downloads\\" #A root directory
+file = "proteomics_dataset.xlsx" #Your dataset
+cancer_classes = [{1: "Luminal A"}, {2: "Luminal B"}, {3: "Triple Negative"}, {4: "HER2"}] #Class descriptions
+output_filename = "test.xlsx" #Output file for predictive accuracies
+
+#Read the dataset
+proteomic_file = pd.read_excel(os.path.join(main_path, file))
+#Define the features and the outcome variable
+X = proteomic_file.iloc[:, :-1] #features
+y = proteomic_file.iloc[:, -1] #outcome variable/classes
+#Assign the class to an object
+tree = tree_classifier( output_filename= output_filename, class_definition = cancer_classes, visualize= True)
+#Fit the model
+optimal_cutoffs, classifiers = tree.fit(X, y)
+#Get predictions
+tree.predict(optimal_cutoffs, classifiers)
+#----------------------------------END EXAMPLES---------------------------------------------------#
+
+
+#----------------------------------------File Permissions---------------------------------------------------------#
+##If you happen to run into file permission errors, you can use this code to fix your problems
+###Note: Just fill in the file_path that you want give all permission to, and suddenly that path,
+#will have the permissions you need
+
+def check_file_permissions_and_adjust(file_path):
+    if os.access(file_path, os.R_OK):
+        print(f"Execute permission is now changed:  {file_path}")
+    else:
+        os.chmod(path = file_path, mode= stat.S_IRWXU)
+        print(f"Execute permission is now changed:  {file_path}")
+
+    if os.access(file_path, os.W_OK):
+        print(f"Execute permission is now changed:  {file_path}")
+
+    else:
+        os.chmod(path=file_path, mode="stat. S_IRWXU")
+        print(f"Execute permission is now changed:  {file_path}")
+
+    if os.access(file_path, os.X_OK):
+        print(f"Execute permission is now changed:  {file_path}")
+    else:
+        os.chmod(path=file_path, mode="stat. S_IRWXU")
+        print(f"Execute permission is now changed: {file_path}")
+#-------------------------------------------End File Permissions------------------------------------------------#
