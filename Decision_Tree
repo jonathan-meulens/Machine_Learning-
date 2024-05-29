@@ -76,32 +76,57 @@ class tree_classifier():
             for ctf in range(2,len(self.training_set)):
                 #Variables needed for entropy/entropy-gain
                 ##Note: We don't initialize the p_variables at 0 , because we want to avoid ZeroDivision Errors
-                p_plus_rest = np.exp(-5) #Amount of matches
-                p_minus_rest = np.exp(-5) #Amount of non-matches
+                #Comparison group 1
+                p_plus_rest_comp_1 = np.exp(-5) #Amount of matches
+                p_minus_rest_comp_1 = np.exp(-5) #Amount of non-matches
+                
+                #Comparison group 2 
+                p_plus_rest_comp_2 = np.exp(-5)  # Amount of matches
+                p_minus_rest_comp_2 = np.exp(-5)  # Amount of non-matches
 
                 #Here we select a comparison group (subclass)
                 start = 0
-                comparison_group = self.training_set.iloc[start:ctf]
-                sub_class_size = len(comparison_group)
+                comparison_group_1 = self.training_set.iloc[start:ctf]
+                comparison_group_2 = self.training_set.iloc[ctf:]
+
+                sub_class_1_size = len(comparison_group_1)
+                sub_class_2_size = len(comparison_group_2)
                 #We turn the values of the comparison group into pd.Series
                 ##Note: This is because , pd.Series have the property in which you get frequency counts of all classes
-                comparison_group_file_pd = pd.Series(comparison_group)
+                comparison_group_1_file_pd = pd.Series(comparison_group_1)
+                comparison_group_2_file_pd = pd.Series(comparison_group_2)
 
                 #We calculate the matches and non-matches for the comparison group with the help of frequency counts (value_counts)
-                matches_comp = comparison_group_file_pd.value_counts().get(c, 0)
-                non_matches_comp = whole_class_size - matches
+                #Comparison group 1 
+                matches_comp_1 = comparison_group_1_file_pd.value_counts().get(c, 0)
+                non_matches_comp_1 = sub_class_1_size - matches_comp_1
+                
+                #Comparison group 2
+                matches_comp_2 = comparison_group_2_file_pd.value_counts().get(c, 0)
+                non_matches_comp_2 = sub_class_2_size - matches_comp_2
 
-                #We define the matches and non-matches for the comparison group
-                p_plus_rest = (p_plus_rest + matches_comp)/sub_class_size
-                p_minus_rest = (p_minus_rest + non_matches_comp)/sub_class_size
+                #We define the matches and non-matches for the comparison groups
+                p_plus_rest_comp_1 = (p_plus_rest_comp_1 + matches_comp_1)/sub_class_1_size
+                p_minus_rest_comp_1= (p_minus_rest_comp_1 + non_matches_comp_1)/sub_class_1_size
 
-                #Calculate entropy subclass
-                entropy_protein_subclass = -p_plus_rest * np.log2(p_plus_rest) - p_minus_rest * np.log2(p_minus_rest)
+                #We define the matches and non-matches for the comparison groups
+                p_plus_rest_comp_2 = (p_plus_rest_comp_2 + matches_comp_2) / sub_class_2_size
+                p_minus_rest_comp_2 = (p_minus_rest_comp_2 + non_matches_comp_2) / sub_class_2_size
+
+                #Calculate entropy subclasses
+                entropy_protein_subclass_1 = -p_plus_rest_comp_1 * np.log2(p_plus_rest_comp_1) - p_minus_rest_comp_1 * np.log2(p_minus_rest_comp_1)
+                entropy_protein_subclass_2 = -p_plus_rest_comp_2 * np.log2(p_plus_rest_comp_2) - p_minus_rest_comp_2 * np.log2(p_minus_rest_comp_2)
+
+                #Calculate the entropies and the sum of the entropies of the subclasses
+                entropy_formula_sub_1 = (sub_class_1_size / whole_class_size) * entropy_protein_subclass_1
+                entropy_formula_sub_2 = (sub_class_2_size / whole_class_size) * entropy_protein_subclass_2
+                ##Note: If we were to choose 3, 4 or 5 subgroups , the sum would be made of 3,4 or 5 entropy_formulas
+                sum_of_entropies_subclasses = entropy_formula_sub_1 + entropy_formula_sub_2
 
                 #Calculating the entropy_gain against all possible subclasses.
                 ##Note: We are essentially testing difference in entropy between the reference class vs all possible subclasses
                 ##Note: Its all possible subclasses , because this is a loop , trying all possible subclasses. (maximum of 2 subclasses)
-                entropy_gain_subclass = {ctf : entropy_protein_class - (sub_class_size/whole_class_size) * entropy_protein_subclass}
+                entropy_gain_subclass = {ctf : entropy_protein_class - sum_of_entropies_subclasses}
                 entropy_gain_per_subclass.append(entropy_gain_subclass)
 
             #Calculate the maximum entropy_gain in all of the combinations above.
