@@ -2,50 +2,64 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 #Define Parameters (For Real Data)
-e = 5
+##Note: We assume the weights have a guassian distribution
 p = 50 #sample size
 X = np.linspace(-5,5,p)
+e = 5 
 mu = 4
-w0 = np.exp(-1*((X - mu)** 2))
+w0 = np.exp(-1*((X - mu)** 2)) # distribution of weights
 N = e*np.random.randn(p,1)
 N = N.flatten()
 
-#Change the dimensions to a 50,0
+#This is the observed data (real data)
 y = X*w0+N
 #----------------------------Getting Optimal Parameters via Gradient Descent------------------------------------#
 #-------------------------------Assuming w has Guassian Distribution-------------------------------#
 
 #Gradient Descent
-random_pick = np.random.randint(p, size=(1,1))
-w = w0[random_pick]
-w = w[0,0]
-MaxIter = 1000
-dCdmu = np.zeros(MaxIter)
-w_updates = np.zeros(MaxIter)
-learning_rate = 1e-3
+#Generate a random index
+random_pick = np.random.randint(p, size=(1,1)) 
+#Plug in random idx , to get random starting weight
+w = w0[random_pick] 
+#Pick one w value
+w = w[0,0]  
+#Set amount of iterations of gradient descent
+MaxIter = 1000 
+#Here collect the gradients during gradient descent
+dCdmu = np.zeros(MaxIter) 
+#Here we collect the weights during gradient descent
+w_updates = np.zeros(MaxIter) 
+#Learning rate
+learning_rate = 1e-3 #Learning rate
+#A depiction of "0" , the value in which we let the gradient descent will stop
 delta = 0.001
+
+#Calculate residuals
 residuals = y - X*w
 
+#Gradient Descent Loop 
 for i in range(MaxIter):
     residuals = y - X*w
     additional_term = X*w*(X-mu)
-    derivative = np.dot(residuals.T, additional_term)
-    #print(derivative)
-    dCdmu[i] = -4 * derivative
+    part_of_derivative = np.dot(residuals.T, additional_term)
+    dCdmu[i] = -4 * part_of_derivative # The whole term is a derivative
     w = w - learning_rate * dCdmu[i]
     w_updates[i] = w
-    if np.abs(dCdmu[i]) < delta:
+    if np.abs(dCdmu[i]) < delta: #Whenver the derivative is smaller than delta, stop gradient descent
         break
 
-#Use the the w from the loop to generate a fitted line
+#Find the optimal w or weight
 w_grad_desc = w_updates[len(w_updates)-1]
 
+#Use the optimal weight to generate optimal y-values/predictions 
 y_grad_desc = w_grad_desc*X
+
+#Plot the observed, predicted and fitted lines 
 fig, ax = plt.subplots()  # Create a figure containing a single axes.
 ax.scatter(X, y, label = "Real Data", color = "blue") #Real Data
 ax.scatter(X, y_grad_desc, label = "Prediction", color = "orange") #Predictions
 ax.plot(X, y_grad_desc, label = "Fitted Line", color = "red") #Fitted Line
 
-
+#Show the figure
 ax.legend()
 plt.show()
