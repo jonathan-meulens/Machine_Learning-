@@ -5,28 +5,39 @@ from sklearn.linear_model import Ridge, Lasso
 
 
 #Define Parameters
+#Number of samples
 n = 100
-p = 50 # sample size and problem dimensionality  (number of genes)
+#Number of genes 
+p = 50
+#Amount of lambda values
 nlambdas = 25
+#Actual lambda values
 lambdas = 10**np.linspace(-2,4,nlambdas)
-X = np.random.rand(n,p)  #generating the expression matrix  (independent variable)
-#print(X.shape)
+#Generating the gene expression matrix 
+X = np.random.rand(n,p)  
+
+#Define the feature weights
 B1 = np.ones(5)
 B2 = np.zeros(p-5)
 B = np.concatenate([B1, B2], axis=None)
-eMag = 1
-X_B = np.matmul(B,X.T)
-noise = np.random.rand(n,1).flatten()
-Y = X_B + eMag * noise #create Y as signal + noise
 
-#Estimate the coefficients using OLS (note the use of backslash).
+#Create noise vector to add later on
+noise = np.random.rand(n,1).flatten()
+
+#Matrix mupltiplication of X (features) and B(feature weights)
+X_B = np.matmul(B,X.T)
+#The real data with some added noise
+##Note: The idea is to see how well LASSO or Rdigde method handle noisy data
+Y = X_B + noise 
+
+#Estimate the coefficients using OLS.
 b_ols_fulldata = np.linalg.lstsq(X, Y, rcond=None)[0]
 #Index 0 gives you the beta_values after OLS
 #Index 1 gives you square residuals
 #Index 2 gives you the rank , how many linearly independent row vectors are there
 #Index 3 gives you the singular values used in residual computations
 
-
+#-----------------------------Cross fold validation---------------------------#
 #Define the splits externally
 folds = 5
 kf_external = KFold(n_splits=folds)
@@ -42,7 +53,6 @@ selLAMBDAridge = np.zeros([25,1]).flatten()
 
 #Save optimal lambda value for lasso  (L2 regulirization)
 selLAMBDAlasso = np.zeros([25,1]).flatten()
-
 
 #Collect a squared residuals per lamda
 lasso_SSE = np.zeros(len(lenght_of_extsplits))
@@ -80,7 +90,6 @@ for s, (train, test) in enumerate(external_splits):
             observed_y = Ytr[test_id]
             eRidge = observed_y - predicted_y
             ridge_SSE[j, k] = np.mean(eRidge**2)
-            #print(f"This is the length of ridge: {len(ridge_SSE)}")
 
             #Internal loop for LASSO
             lasso = Lasso(alpha=lambdas[k])
@@ -98,18 +107,15 @@ for s, (train, test) in enumerate(external_splits):
 
     #This is the index of the lambda that causes the least error (SSE) for RIDGE
     eloc_ridge.append(np.where(ridge_SSE == ridge_emin[s]))
-    print(f"eloc per iteration {eloc_ridge}")
+
     # Mean error of all folds for LASSO
     lasso_m_lass0_SSE.append(np.mean(lasso_SSE))
 
-    # Minimal error of all folds  for LASSO
+    # Minimal error of all folds for LASSO
     lasso_e_lasso_min.append(np.min(lasso_SSE))
-    print(f"this is the minimal value of lasso : {lasso_e_lasso_min}")
 
-
-    # This where the minimal error is located  for LASSO
+    # This where the minimal error is located for LASSO
     e_lasso_loc.append(np.where(lasso_SSE == lasso_e_lasso_min[s]))
-    print(f"this is the location minimal list location {e_lasso_loc}")
 
     #Test the optimal lamba for RIDGE
     selLAMBDAridge[s] = lambdas[eloc_ridge[s][1]]
@@ -120,7 +126,7 @@ for s, (train, test) in enumerate(external_splits):
     E = observed_y - predicted_y
     ridge_Eout.append(np.mean(E**2))
 
-    #Optimal coefficients for fit
+    #Optimal coefficients for ridge model fitting
     ridge_BSEL.append(ridge.coef_)
 
     #Test the optimal lamba for LASSO
@@ -132,19 +138,15 @@ for s, (train, test) in enumerate(external_splits):
     E_lasso = observed_y - predicted_y
     lasso_E_out_lasso.append(np.mean(E_lasso ** 2))
 
-    #Define optimal coefficients for lasso fit
+    #Define optimal coefficients for lasso model fitting
     lasso_BSEL.append(lasso.coef_)
 
-# # Figures with Ridge
-# # Assuming lambdas, mSSE, eloc, emin, Eout, BridgeSEL, and B are already defined
-# # Plot the cross-validation curves
+#-------------------------------------Figures with Ridge and LASSO-----------------------------#
+# Plot the cross-validation curves
 eloc_ridge_plot = []
 for i in range(len(eloc_ridge)):
     eloc_ridge_plot.append(eloc_ridge[i][1])
-# print(f"THIS IS THE LOCATION OF THE LEAST SSE : {eloc_ridge[0]}")
-# print(f"THIS IS THE LOCATION OF THE LEAST SSE : {eloc_ridge[0][1]}")
 
-#print(f'This is the optimal value: {lambdas[0]}')
 lasso_e_lasso_min_arr = np.array(lasso_e_lasso_min)
 lasso_opt_values = np.array([0.01, 0.01, 0.01, 0.01, 0.01])
 
@@ -161,7 +163,7 @@ plt.legend()
 plt.show()
 
 
-
+#Plot the changing weight values over the iterations
 plt.subplot()
 plt.plot(ridge_BSEL,  linewidth=2)
 plt.plot(np.linspace(0,50,50), B, c="r", linewidth=1)
@@ -184,7 +186,7 @@ plt.legend()
 plt.show()
 
 
-# Plot the true betas
+# Plot the optimal betas (weights)
 plt.subplot()
 plt.plot(lasso_BSEL, linewidth=2)
 plt.plot(B, 'r.-', linewidth=1)
