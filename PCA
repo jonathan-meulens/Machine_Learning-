@@ -1,0 +1,366 @@
+#Libraries needed 
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from tabulate import tabulate
+
+
+#PCA Class
+class PCA():
+    def __init__(self, sample_plotting_df = []):
+        #All the storage needed for the rest of the operations
+        self.SSR_per_gene = []
+        self.SSR_per_sample = []
+        self.pc_variance = {}
+        self.pc_gene = {}
+        self.gene_exp_means = []
+        self.visual_pcs = ['PC1', 'PC2', 'PC3']
+        self.gene_pc_dict = {cols:[] for cols in self.visual_pcs}
+        self.VAR_per_sample_df = sample_plotting_df
+        self.max_SSR_id = 0
+
+
+    #The fit function to be able to calculate the PC's, variances and genes related to the PC's
+    def fit(self, X, covariance, standardize = False, normalize = False, no_cov = False):
+
+        #Function to turn SSR into Variance; Should be applied to SSR (Sum of Squared Residuals) values below.
+        def variance_calc(value):
+            degrees_freedom = len(X) - 1
+            value = value / degrees_freedom
+            return value
+
+            #Function to eliminate covariances (If user pleases to)
+        def covariance_calc(covariance = None): #Add user covariance threshold
+            #Variables needed for the operations below
+            SSR_ref = 0
+            SSR_comp = 0
+            original_indices = X.index.tolist()
+            new_indices = []
+            new_columns = X.columns.tolist()
+            means_per_gene = []
+            index_check_list = []
+            new_df_list = []
+            no_cov_dict = {col: [] for col in X.columns}
+
+            #Calculate the mean value of each the feature (gene expression) values across samples
+            for i in range(len(X)):
+                gene_range = X.iloc[i]
+                mean_gene_exp = np.mean(gene_range)
+                means_per_gene.append(mean_gene_exp)
+
+            for i in range(len(X)):
+                for s in range(len(X.iloc[1])):
+                    #Calculate SSR values across samples for a ref gene
+                    SSR_ref = SSR_ref + (X.iloc[i][s] - means_per_gene[i])**2
+                #Save the Total SSR value of the whole feature (ref gene)
+                SSR_ref_idx = {SSR_ref: i}
+                start = i + 1
+                for p in range(start, len(X)):
+                    for j in range(len(X.iloc[1])):
+                        # Calculate SSR values across samples for a comparison gene
+                        SSR_comp = SSR_comp + (X.iloc[p][j] - means_per_gene[p])**2
+                    # Save the Total SSR value of the whole feature (comparison gene)
+                    SSR_comp_idx = {SSR_comp: p}
+                    SSR_idx_comp_list = [SSR_ref_idx,SSR_comp_idx]
+                    SSR_val_comp_list = [SSR_ref,SSR_comp]
+                    #Calculate the covariance between the ref and the comp gene
+                    calculated_covariance = (SSR_val_comp_list[0] * SSR_val_comp_list[1])/(len(X.iloc[1]-1))
+
+                    if covariance != None:
+                        #If the calculated covariance > threshold then eliminate covariate feature (gene)
+                        if calculated_covariance > covariance:
+                            #Take out the correct row
+                            self.max_SSR_id = np.argmax(SSR_val_comp_list)
+
+                            correct_SSR_idx = list(SSR_idx_comp_list[self.max_SSR_id].values())[0]
+                            if correct_SSR_idx not in index_check_list:
+                                new_df_list.append(X.iloc[correct_SSR_idx])
+                                new_indices.append(correct_SSR_idx)
+
+                            #To be prevent the duplicate columns from being added in the no_cov_df
+                            index_check_list.append(correct_SSR_idx)
+
+
+                        else:
+                            idx_ref = list(SSR_ref_idx.values())[0]
+                            idx_comp = list(SSR_comp_idx.values())[0]
+
+                            #Add check for index
+                            if idx_ref not in index_check_list:
+                                new_df_list.append(X.iloc[idx_ref])
+                                new_indices.append(idx_ref)
+                            if idx_comp not in index_check_list:
+                                new_df_list.append(X.iloc[idx_comp])
+                                new_indices.append(idx_comp)
+
+                            index_check_list.append(idx_ref)
+                            index_check_list.append(idx_comp)
+                    else:
+                        raise RuntimeError("Fill in a maximum covariance threshold")
+
+
+                    if self.max_SSR_id == 0:
+                        i = i + 1
+
+            teller = 0
+            new_indices = list(dict.fromkeys(new_indices))
+            original_indices = np.array(original_indices)
+            no_cov_df_indices = original_indices[new_indices]
+            number_of_vars = new_df_list[0].tolist()
+            for j in range(len(number_of_vars)):
+                for i in range(len(new_df_list)):
+                    col_val = new_df_list[i][j]
+                    no_cov_dict[new_columns[j]].append(col_val)
+                    teller = teller + 1
+
+            no_cov_df = pd.DataFrame(no_cov_dict)
+            no_cov_df.index = no_cov_df_indices
+            return no_cov_df
+
+
+
+        #To store the variances related to each PC
+        var_pc_list = []
+
+        #Initialize a dictionary with col_names as keys and empty variance lists as values
+        ##NOTE: This will be usefull to readily create a dataframe afterwards
+        SSR_per_sample_dict = {col:[] for col in X.columns}
+        SSR = 0
+        if no_cov:
+            X = covariance_calc(covariance)
+        else:
+            X = X
+        for i in range(len(X)):
+            gene_range = X.iloc[i]
+            #If user wishes to normalize the feature (gene expression) values.
+            if normalize:
+                maximum_gene_expression_val = max(gene_range)
+                minimum_gene_expression_val = min(gene_range)
+                maximum_gene_range = (maximum_gene_expression_val - minimum_gene_expression_val)
+                normalized_gene_range = (np.array(gene_range) - minimum_gene_expression_val) / maximum_gene_range
+                X.iloc[i] = normalized_gene_range
+                mean_gene_exp = np.mean(X.iloc[i])
+                self.gene_exp_means.append(mean_gene_exp)
+
+            #If user wishes to standardize the feature (gene expression) values
+            elif standardize:
+                mean_gene_expression_val = np.mean(gene_range)
+                std_gene_exp = np.std(mean_gene_expression_val, ddof=1)
+                standardized_gene_range = np.array(gene_range) - mean_gene_expression_val/std_gene_exp
+                X.iloc[i] = standardized_gene_range
+                mean_gene_exp = np.mean(X.iloc[i])
+                self.gene_exp_means.append(mean_gene_exp)
+
+            #If not the continue with normal values (Not recommended if features differ to much in numeric scale)
+            else:
+                mean_gene_exp = np.mean(X.iloc[i])
+                self.gene_exp_means.append(mean_gene_exp)
+
+        #Assign the right dataframe based on the user wanting to deal with covariates or not
+        ##If user wants to eliminate covariance
+        for i in range(len(self.gene_exp_means)):
+            print(f"This is the current iteration: {i}")
+            for v in range(len(X.columns)):
+                #Calculate SSR per sample
+                SSR = SSR + (X.iloc[i,v] - self.gene_exp_means[i]) ** 2
+                #This dataframe contains the SSR per sample (Columns = Sample , Rows = genes)
+                SSR_per_sample_dict[X.columns[v]].append(SSR)
+
+            # This is the SSR per Principal Component (per feature(s))
+            var_pc = SSR / (len(X) - 1)
+            var_pc_list.append(var_pc)
+
+        #Turn the list into pd.Series to be able to sort the PC belo
+        var_pc_df = pd.Series(var_pc_list)
+
+        # Sort the values from PC1 to ....PCn
+        var_pc_df = var_pc_df.sort_values(ascending=False)
+
+        #Initialize list that will contain the PC names
+        pc_indeces = []
+        # Generate the amount Principal Components
+        for i in range(len(var_pc_df)):
+            pc_indeces.append(f"PC{i + 1}")
+
+        #Assign the columns (variances), with the names of their Principal Components
+        var_sorted_var_df = var_pc_df.copy()
+        var_sorted_var_df.index = pc_indeces
+
+        #Turn the SSR dict per sample into a dataframe
+        SSR_per_sample_df = pd.DataFrame(SSR_per_sample_dict)
+
+        # Save the per sample SSR for the pca_plot later
+        self.VAR_per_sample_df = SSR_per_sample_df.apply(variance_calc, axis=0)
+        self.VAR_per_sample_df.index = X.index
+
+
+        #Collect the new sequential order of indices in the dataframe (Because we ordered it above)
+        var_pc_ls = list(var_pc_df)
+        visual_var_pc_ls = var_pc_ls[:3]
+
+        #With the new sequential order, assign the proper PC to its corresponding feature as well as variance
+        for i, c_idx in enumerate(var_sorted_var_df):
+            self.pc_variance[f'PC{i + 1}'] = visual_var_pc_ls[i]
+            if i == 2:
+                break
+        # With the new sequential order, assign the proper PC to its corresponding feature (gene) as well as variance
+        pc_indices = var_pc_df.index.tolist()
+        for i, idx in enumerate(pc_indices):
+            self.gene_pc_dict[f'PC{i + 1}'] = X.index[idx]
+
+
+        #Return the dataframe with all the PC's and their variances
+        return var_sorted_var_df
+
+
+
+
+    #Function to visualize the PC's in the visible plane (up to 3-dimensions)
+    def visualize(self, pc_data):
+        x = []
+        y = []
+        z = []
+
+        # Visualization
+        ##FIGURE IT OUT LATER!! DIFFERENCE between the var_sample in cov and no cov
+        for c in self.VAR_per_sample_df.columns:
+            sample = self.VAR_per_sample_df[c]
+            mask = np.isin(self.VAR_per_sample_df.index.tolist(), list(self.gene_pc_dict.values()))
+            coordinates = sample[mask].tolist()
+            x.append(coordinates[0])
+            y.append(coordinates[1])
+            z.append(coordinates[2])
+
+
+
+        # Scree Plot
+        # Data to create barplot to visualize actual vs predicted # of patients in each cancer category
+        ##Observed numbers
+        #The names of the PC's
+        c_name_obs = tuple(list(pc_data.index))
+        pc_data_list = pc_data.iloc[:].tolist()
+
+        #Calculate the %explained_variance of all PC's
+        total_variance = sum(pc_data_list)
+        for i in range(len(pc_data_list)):
+            pc_data_list[i] = (pc_data_list[i] * 100)/total_variance
+
+
+        #The % explained_variance of the pc's
+        actual_casualties = pc_data_list
+        #Calculate the positioning of the bars
+        obs_pos = np.arange(len(c_name_obs))
+        # Create a figure with 2 subplots
+        fig, axs = plt.subplots(figsize=(15, 5))
+
+        # Create the bar plot for observed amounts
+        axs.bar(obs_pos, actual_casualties)
+        axs.set_xticks(obs_pos, tuple(c_name_obs))
+        axs.set_xlabel("Principal Components")
+        axs.set_ylabel("% Explained Variance")
+        axs.set_title("Scree Plot")
+
+        # Display the plots
+        plt.tight_layout()
+        plt.show()
+
+        #Visualize pca plot
+        ##Most colors available by matplotlib (However if you are working with higher samples , you will need to add more)
+        all_possible_colors = ["b","g","r","c","m","y","k","w"] #You are welcome to expand this, if you are working more genes
+
+        #Check how many samples the dataset has and assign the colors accordingly
+        colors = ()
+        for i in range(len(x)):
+            color = all_possible_colors[i]
+            colors = (*colors, color)
+
+        # If there are only 1 dimensions
+        if len(x) != 0 and len(y)== 0 and len(z)== 0:
+            ax = plt.figure().add_subplot()
+            y = np.zeros(len(x))
+            ax.scatter(x, y, c=colors)
+            ax.legend()
+            # Only the 1 most important (Can't visualize above 4D)
+            ax.set_xlabel('PC1')
+            # Plot Scree plot
+            plt.show()
+
+        ## If there are only 2 dimensions
+        if len(x)!= 0 and len(y)!= 0 and len(z)== 0:
+            ax = plt.figure().add_subplot()
+
+            ax.scatter(x, y, c=colors)
+            ax.legend()
+            #Only the 2 most important (Can't visualize above 4D)
+            ax.set_xlabel('PC1')
+            ax.set_ylabel('PC2')
+            #Plot Scree plot
+            plt.show()
+        # If there are 3 dimensions
+        if len(x)!= 0 and len(y)!= 0 and len(z)!= 0:
+            ax = plt.figure().add_subplot(projection='3d')
+            ax.scatter(x, y, z, c=colors)
+            ax.legend()
+            #Only the 3 most important (Can't visualize above 4D)
+            ax.set_xlabel('PC1')
+            ax.set_ylabel('PC2')
+            ax.set_zlabel('PC3')
+            #Plot Scree plot
+            plt.show()
+
+    #Function to acquire tabular data on the PC's and get an idea on which features each PC represents
+    def explained_variances(self, pc_data):
+        #Print the pretty table
+        table_columns = pc_data.index.tolist()
+        headers = ["Principal Components", table_columns]
+
+        # Print the table with accuracy per protein per cancer-type --> (Rows = Protein , Columns = Cancer Type)
+        pc_table = tabulate(pd.DataFrame(pc_data), headers, tablefmt="pretty")
+
+        #Print the statements explaining the which gene represents the PC
+        for i in range(len(self.gene_pc_dict)):
+            pc = list(self.gene_pc_dict.keys())[i]
+            gene = list(self.gene_pc_dict.values())[i]
+            print(f"{pc} explains the variance cause by the gene: {gene}")
+
+
+
+
+
+
+#--------------------------Example Use--------------------------------------------#
+#Get a dataset for PCA
+##Mock dataset
+##Note: Kaggle has many datasets that can be used for PCA
+x = {'one': pd.Series([100, 200, 300, 400],
+                      index=['a', 'b', 'c', 'd']),
+     'two': pd.Series([300, 400, 750, 550],
+                      index=['a', 'b', 'c', 'd']),
+     'three': pd.Series([500, 900, 1000, 600],
+                      index=['a', 'b', 'c', 'd']),
+
+     'four': pd.Series([550, 950, 1500, 700],
+                      index=['a', 'b', 'c', 'd']),
+
+     'five': pd.Series([350, 500, 700, 500],
+                      index=['a', 'b', 'c', 'd']),
+
+     'six': pd.Series([1000, 2000, 2500, 900],
+                      index=['a', 'b', 'c', 'd'])
+     }
+#Make sure the dataset is turned into a dataframe
+##Note: Typically with datasets downloaded from the web you will read the dataset with --> pd.read_csv(downloaded_data_path)
+X = pd.DataFrame(x)
+
+#Create a usable object
+pca = PCA()
+
+#When fitting the pca object, you return a dataframe with variance values per sample per feature(gene) (Rows = features , Columns = samples)
+##Note: I highly recommend always having a covariance threshold in mind to avoid covariates
+pca_data = pca.fit(X, no_cov=True, covariance=1000)
+
+#Visualize the Scree plot and the PCA plot
+pca.visualize(pc_data=pca_data)
+
+#Get tabular data on the PC's (e.g; % Variance explained by PC as well as the feature(gene) the PC represents)
+pca.explained_variances(pc_data=pca_data)
