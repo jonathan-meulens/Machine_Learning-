@@ -1,4 +1,4 @@
-# Machine_Learning-
+# Machine Learning Algorithms
 All_Things_Machine_Learning
 
 These are simply some small machine learning projects that i have done. The idea was to code machine learning alogorthims , such as gradient descent from scratch. 
